@@ -37,6 +37,7 @@ export default function RegistrationForm({ user }: { user: User | null }) {
   const [website, setWebsite] = useState<string | null>(null)
   const [age, setAge] = useState<string | null>(null)
   const [avatar_url, setAvatarUrl] = useState<string | null>(null)
+  const [isCheck, setCheck ] = useState<string | null>(null);
 
   const form = useForm<z.infer<typeof registerFormSchema>>({
     defaultValues: {
@@ -45,39 +46,14 @@ export default function RegistrationForm({ user }: { user: User | null }) {
       age: '',
       gender: '',
       email: '',
-      avatar_url: '',
       password: '',
       confirmPassword: '',
-      website_url: '',
-      bio: ''
     },
+    resolver: zodResolver(registerFormSchema)
 
-  })
+  });
 
-  // const getProfile = useCallback(async () => {
-  //   try {
-  //     setLoading(true)
 
-  //     const { data, error, status } = await supabase
-  //       .from('profiles')
-  //       .select('username, full_name, age, avatar_url')
-  //       .eq('id', user?.id)
-  //       .single()
-  //     if (error && status !== 406) {
-  //       console.log(error)
-  //       throw error;
-  //     }
-  //   } catch (error) {
-  //     toast.error("Error loading user data.");
-  //   } finally {
-  //     setLoading(false);
-  //   }
-
-  // }, [user, supabase])
-
-  // useEffect(() => {
-  //   getProfile()
-  // }, [user, getProfile])
 
 
   async function updateProfile({
@@ -121,12 +97,12 @@ export default function RegistrationForm({ user }: { user: User | null }) {
         password: values.password,
         options: {
           data: {
-            full_name: values.full_name,
-            avatar_url: values.avatar_url,
-            age: values.age,
-            gender: values.gender,
             username: values.username,
-            website: values.website_url,
+            full_name: values.full_name,
+            age: values.age,
+            // TODO: value, male, female, nonbinary, prefer not to say
+            // TODO: drop-down menu
+            gender: values.gender,
           }
         }
       });
@@ -319,8 +295,10 @@ export default function RegistrationForm({ user }: { user: User | null }) {
                       <FormMessage />
                     </FormItem>
                   )}
-                />
 
+
+                />
+               
                 {/* Website Field (optional)
                 <FormField
                   control={form.control}
@@ -370,6 +348,8 @@ export default function RegistrationForm({ user }: { user: User | null }) {
             <Link href="/auth/login" className="text-[#ff7f3f] hover:text-[#ED5E20] transition-colors duration-200 hover:underline">
               Login
             </Link>
+            {/* TODO: Checkbox for terms and agreemnt  */}
+            {/* Checkbox */}
           </div>
         </div>
       </div>

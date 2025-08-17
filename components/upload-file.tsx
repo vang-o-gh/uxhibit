@@ -1,9 +1,16 @@
 "use client";
 
+import { parseFigmaUrl } from "@/lib/figma";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
+
+type ParsedFigma = { fileKey: string; nodeId?: string; name?: string };
 
 export default function FigmaLinkUploader() {
+  const router = useRouter();
+  const [lastId, setLastId] = useState<string | null>(null);
   const [link, setLink] = useState("");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -11,71 +18,115 @@ export default function FigmaLinkUploader() {
   const [age, setAge] = useState("");
   const [occupation, setOccupation] = useState("");
 
-
-  // TODO: Link Validator
-  const handleUpload = () => {
-    // TODO: Expand the following link
-    if (!link || !link.includes("figma.com")) {
-      toast.error("Please enter a valid Figma link.")
+  async function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = parseFigmaUrl(link);
+    if (!parsed) {
+      toast.error("The input is empty");
       return;
     }
-
-    // TODO: Loading screen
     setLoading(true);
-    setProgress(0);
+    setProgress(10);
 
-    // Replace with real ones
-    let hasUploaded = false;
-    const fakeUpload = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          if (!hasUploaded) {
-            clearInterval(fakeUpload);
-            setLoading(false);
-            setUploadedLink(link);
-            hasUploaded = true;
+    try {
+      const res = await fetch("/api/figma/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: link }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data?.error || "Failed to parse Figma link");
+        setLoading(false);
+        setProgress(0);
+        return;
+      }
 
-            const extractFileKey = (url: string) => {
-              const match = url.match(/file\/([a-zA-Z0-9]+)\//);
-              return match ? match[1] : "unknown";
-            };
+      setProgress(80);
 
-            const figmaKey = extractFileKey(link);
 
-            const newDesign = {
-              id: crypto.randomUUID(),
-              figma_link: link,
-              thumbnail: `https://api.figma.com/v1/images/${figmaKey}?ids=0:1&format=png`,
-              project_name: "Untitled Design",
-              likes: 0,
-              views: 0,
-              age,
-              occupation,
-            };
+      const newDesign = {
+        id: crypto.randomUUID(),
+        figma_link: link,
+        project_name: data?.name || "Untitled Design",
+        likes: 0,
+        views: 0,
+        age,
+        occupation,
+        // store keys so gallery can render thumbnails automatically
+        fileKey: parsed?.fileKey || null,
+        nodeId: parsed?.nodeId || null,
+        // optional immediate preview if you already have one
+        thumbnail: (data?.nodeImageUrl as string) || (data?.thumbnailUrl as string) || null,
+        createdAt: new Date().toISOString(),
+      };
 
-            const existing = JSON.parse(localStorage.getItem("designs") || "[]");
+      try {
 
-            const isDuplicate = existing.some((design: any) => design.figma_link === link);
-
-            if (isDuplicate) {
-              toast.error("This design is already uploaded.");
-            } else {
-              localStorage.setItem("designs", JSON.stringify([...existing, newDesign]));
-              toast.success("Design uploaded successfully!");
-            }
-          }
-          return 100;
+        // get the signed-in user from Supabse (client-side)
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          toast.error("Please sign in first.");
+          setLoading(false);
+          setProgress(0);
+          return;
         }
 
-        return prev + 20;
-      });
-    }, 200);
+
+        const saveRes = await fetch("/api/designs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            // owner_id: ownerId, // TODO: inject from your auth/session
+            title: newDesign.project_name,
+            figma_link: link,
+            file_key: newDesign.fileKey,
+            node_id: newDesign.nodeId,
+            thumbnail_url: newDesign.thumbnail,
+            snapshot: { age, occupation },
+            ai: null,
+          }),
+        });
+        const saved = await saveRes.json();
+        // attach remote identifiers to your local record
+        (newDesign as any).remoteId = saved?.design?.id;
+        (newDesign as any).remoteCurrentVersionId = saved?.current_version?.id;
+        (newDesign as any).remoteVersionNumber = saved?.current_version?.version;
+
+      } catch (e: any) {
+        toast.error(e.message || "Failed to save to database");
+        setLoading(false);
+        setProgress(0);
+        return;
+      }
+      const existing = JSON.parse(localStorage.getItem("designs") || "[]");
+      // const isDuplicate = existing.some((d: any) => d.figma_link === link);
+
+      // if (isDuplicate) {
+      //   toast.error("This design is already uploaded.");
+      //   setLoading(false);
+      //   setProgress(0);
+      //   return;
+      // } 
+      
+        localStorage.setItem("designs", JSON.stringify([newDesign, ...existing])); toast.success("Design uploaded successfully!");
+        setUploadedLink(link);
+        setLastId(newDesign.id);
+        setProgress(100);
+      
+    } catch {
+      toast.error("Network error");
+      setProgress(0);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const isParamsComplete = age.trim() !== "" && occupation.trim() !== "";
 
-    // Limit only to maximum of 10 design per user
-      return (
+  // Limit only to maximum of 10 design per user
+  return (
     <div className="flex flex-col items-center justify-center space-y-6 w-full px-2">
       {/* Upload Inputs */}
       <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-4">
@@ -141,10 +192,11 @@ export default function FigmaLinkUploader() {
           {/* Evaluate Button */}
           <button
             className={`px-8 py-3 rounded-md text-white text-sm font-medium ${isParamsComplete
-                ? "bg-[#ED5E20] hover:bg-orange-600 hover:cursor-pointer"
-                : "bg-gray-400 cursor-not-allowed"
+              ? "bg-[#ED5E20] hover:bg-orange-600 hover:cursor-pointer"
+              : "bg-gray-400 cursor-not-allowed"
               } w-full`}
-            disabled={!isParamsComplete}
+            disabled={!isParamsComplete || !uploadedLink}
+            onClick={() => lastId && router.push(`/designs/${lastId}`)}
           >
             Evaluate Design
           </button>
